@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const emptyState = document.getElementById('empty-state');
   const taskCountEl = document.getElementById('task-count');
   const statusBadge = document.getElementById('status-badge');
+  const minViewsInput = document.getElementById('min-views-input');
 
   // タスクの読み込みとレンダリング
   function loadTasks() {
@@ -161,8 +162,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // 最低再生数の設定を読み込み
+  function loadSettings() {
+    chrome.storage.local.get({ minViews: 0 }, (result) => {
+      minViewsInput.value = result.minViews || '';
+    });
+  }
+
+  // 最低再生数変更時の保存
+  minViewsInput.addEventListener('input', (e) => {
+    let val = parseInt(e.target.value, 10);
+    if (isNaN(val) || val < 0) {
+      val = 0;
+    }
+    chrome.storage.local.set({ minViews: val });
+  });
+
   // 初期ロード
   loadTasks();
+  loadSettings();
 });
 
 // 削除時のスライドアウトアニメーションの定義を追加するための動的CSSインジェクション

@@ -36,7 +36,14 @@ YouTubeはプログラミングの解説動画を見たり、勉強用BGMを流�
 
 ### 実行画面
 
+サムネイル
+
 ![alt text](image-1.png)
+
+ポップアップ
+
+![alt text](image-2.png)
+
 
 ## 🛠️ 技術スタック
 * **コア**: HTML5 / CSS3 (Vanilla CSS) / JavaScript (Vanilla JS)

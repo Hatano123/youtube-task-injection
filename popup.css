@@ -343,3 +343,58 @@ footer {
   font-size: 10px;
   color: var(--text-muted);
 }
+
+/* Settings Section */
+.settings-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: rgba(19, 27, 46, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+
+.settings-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#min-views-input {
+  width: 90px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: right;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+#min-views-input:focus {
+  border-color: var(--accent-color);
+}
+
+.settings-unit {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Hide Spin Buttons */
+#min-views-input::-webkit-outer-spin-button,
+#min-views-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+

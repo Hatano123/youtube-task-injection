@@ -18,6 +18,39 @@
     return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
   }
 
+  // 再生回数のテキストを数値に変換するヘルパー関数
+  function parseViewCount(text) {
+    if (!text) return 0;
+    
+    // 不要な文字を除去して数字部分を抽出
+    let numText = text.replace(/,/g, '')
+                      .replace(/views/i, '')
+                      .replace(/回/g, '')
+                      .replace(/視聴/g, '')
+                      .replace(/回視聴/g, '')
+                      .trim();
+    
+    let multiplier = 1;
+    if (numText.includes('万')) {
+      multiplier = 10000;
+      numText = numText.replace('万', '');
+    } else if (numText.includes('億')) {
+      multiplier = 100000000;
+      numText = numText.replace('億', '');
+    } else if (numText.includes('K') || numText.includes('k')) {
+      multiplier = 1000;
+      numText = numText.replace(/[Kk]/, '');
+    } else if (numText.includes('M') || numText.includes('m')) {
+      multiplier = 1000000;
+      numText = numText.replace(/[Mm]/, '');
+    } else if (numText.includes('B') || numText.includes('b')) {
+      multiplier = 1000000000;
+      numText = numText.replace(/[Bb]/, '');
+    }
+    
+    const val = parseFloat(numText);
+    return isNaN(val) ? 0 : val * multiplier;
+  }
 
   // デバッグ用ログ
   function log(...args) {
@@ -96,7 +129,7 @@
     isManipulatingDOM = false;
   }
 
-  // 未完了タスクをもとに動画プールを構築
+  // 未完了タスクをもとに動画プールを構築 (個別タスク単体に加え、複合クエリでも検索を行う)
   async function refreshVideoPool() {
     if (!isContextValid()) return;
     const uncompletedTasks = activeTasks.filter(t => !t.completed);
@@ -111,10 +144,34 @@
 
     try {
       const allTaskVideos = [];
-      
-      for (const task of uncompletedTasks) {
-        const query = task.text;
-        
+      const queries = [];
+
+      // 1. 各タスク単体の個別クエリを追加
+      uncompletedTasks.forEach(task => {
+        queries.push(task.text.trim());
+      });
+
+      // 2. 複数の未完了タスクがある場合、キーワードを掛け合わせた複合クエリを自動生成
+      if (uncompletedTasks.length >= 2) {
+        // 全体の結合クエリ (最大3個まで連結して複雑になりすぎるのを防ぐ)
+        const combinedAll = uncompletedTasks.slice(0, 3).map(t => t.text.trim()).join(' ');
+        queries.push(combinedAll);
+
+        // タスクが3個以上ある場合、隣り合うペアの複合クエリも生成 (例: A B, B C, C A)
+        if (uncompletedTasks.length >= 3) {
+          for (let i = 0; i < uncompletedTasks.length; i++) {
+            const nextIdx = (i + 1) % uncompletedTasks.length;
+            const combinedPair = `${uncompletedTasks[i].text.trim()} ${uncompletedTasks[nextIdx].text.trim()}`;
+            queries.push(combinedPair);
+          }
+        }
+      }
+
+      // 重複クエリを排除
+      const uniqueQueries = [...new Set(queries)].filter(q => q.length > 0);
+      log('Generated search queries (including composites):', uniqueQueries);
+
+      for (const query of uniqueQueries) {
         // キャッシュにあればそれを使用
         if (videoCache[query]) {
           allTaskVideos.push(...videoCache[query]);
@@ -150,8 +207,27 @@
         }
       }
 
+      // 最低再生数の設定を取得してフィルタリング
+      const settings = await new Promise((resolve) => {
+        if (!isContextValid()) {
+          resolve({ minViews: 0 });
+          return;
+        }
+        chrome.storage.local.get({ minViews: 0 }, (res) => resolve(res));
+      });
+      const minViews = settings.minViews || 0;
+
+      let filteredVideos = allTaskVideos;
+      if (minViews > 0) {
+        filteredVideos = allTaskVideos.filter(video => {
+          const views = parseViewCount(video.viewCountText);
+          return views >= minViews;
+        });
+        log(`Filtered videos by minViews (${minViews}): ${allTaskVideos.length} -> ${filteredVideos.length}`);
+      }
+
       // 取得した動画をシャッフルまたは交互にマージしてプールに格納
-      videoPool = shuffleArray(allTaskVideos);
+      videoPool = shuffleArray(filteredVideos);
       
     } catch (e) {
       console.error('Error refreshing video pool:', e);
