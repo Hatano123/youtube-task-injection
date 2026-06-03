@@ -1,0 +1,519 @@
+/* YouTube Task-Inject Content Script Stylesheet */
+
+/* YouTubeのテーマ（ダーク/ライト）に応じた変数定義 */
+:root {
+  --ti-bg: #0f172a;
+  --ti-card-bg: #1e293b;
+  --ti-border: rgba(255, 255, 255, 0.08);
+  --ti-text-main: #f8fafc;
+  --ti-text-sub: #94a3b8;
+  --ti-accent-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --ti-accent-color: #3b82f6;
+  --ti-success: #10b981;
+  --ti-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* YouTubeのライトモード時の色調整 (YouTubeのhtmlタグの属性で判定される) */
+html:not([dark]) {
+  --ti-bg: #f1f5f9;
+  --ti-card-bg: #ffffff;
+  --ti-border: rgba(0, 0, 0, 0.08);
+  --ti-text-main: #0f172a;
+  --ti-text-sub: #475569;
+  --ti-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* インジェクトするラッパーの基本スタイル */
+.task-inject-wrapper {
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  animation: tiFadeIn 0.4s ease forwards;
+}
+
+@keyframes tiFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* タスクパネルカード */
+.ti-panel {
+  background-color: var(--ti-card-bg);
+  border: 1px solid var(--ti-border);
+  border-radius: 12px;
+  padding: 16px;
+  height: 100%;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--ti-shadow);
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 装飾的なグラデーションバー */
+.ti-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--ti-accent-gradient);
+}
+
+.ti-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ti-border);
+}
+
+.ti-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ti-text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ti-panel-badge {
+  font-size: 10px;
+  background: var(--ti-accent-gradient);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-weight: 600;
+}
+
+/* 未設定時のフォーム */
+.ti-empty-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  flex-grow: 1;
+  text-align: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.ti-empty-icon {
+  font-size: 28px;
+  animation: tiPulse 2s infinite ease-in-out;
+}
+
+@keyframes tiPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.ti-empty-text {
+  font-size: 13px;
+  color: var(--ti-text-main);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ti-empty-subtext {
+  font-size: 11px;
+  color: var(--ti-text-sub);
+  margin-bottom: 4px;
+}
+
+.ti-input-form {
+  display: flex;
+  width: 100%;
+  gap: 6px;
+}
+
+.ti-input {
+  flex-grow: 1;
+  background-color: var(--ti-bg);
+  border: 1px solid var(--ti-border);
+  color: var(--ti-text-main);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.ti-input:focus {
+  border-color: var(--ti-accent-color);
+}
+
+.ti-submit-btn {
+  background: var(--ti-accent-gradient);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.ti-submit-btn:active {
+  transform: scale(0.95);
+}
+
+/* タスクリスト表示 */
+.ti-task-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex-grow: 1;
+  padding-right: 2px;
+  max-height: 180px;
+}
+
+.ti-task-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ti-task-list::-webkit-scrollbar-thumb {
+  background: var(--ti-border);
+  border-radius: 4px;
+}
+
+.ti-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background-color: var(--ti-bg);
+  border: 1px solid var(--ti-border);
+  padding: 10px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.ti-task-item:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+html:not([dark]) .ti-task-item:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.ti-checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+}
+
+.ti-checkbox {
+  display: none;
+}
+
+.ti-custom-checkbox {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ti-text-sub);
+  border-radius: 4px;
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.ti-checkbox:checked + .ti-custom-checkbox {
+  border-color: var(--ti-success);
+  background-color: var(--ti-success);
+}
+
+.ti-checkbox:checked + .ti-custom-checkbox::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.ti-task-text {
+  font-size: 12px;
+  color: var(--ti-text-main);
+  margin-left: 8px;
+  line-height: 1.4;
+  word-break: break-all;
+  user-select: none;
+}
+
+.ti-checkbox:checked ~ .ti-task-text {
+  color: var(--ti-text-sub);
+  text-decoration: line-through;
+}
+
+/* サジェスト動画カード (YouTube純正デザインへのブレンド) */
+.ti-video-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.ti-video-thumbnail-wrapper {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 Aspect Ratio */
+  background-color: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.ti-video-thumbnail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+
+.ti-video-card:hover .ti-video-thumbnail {
+  transform: scale(1.03);
+}
+
+/* 学習サジェストバッジ */
+.ti-video-suggest-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--ti-accent-gradient);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  letter-spacing: 0.5px;
+}
+
+.ti-video-duration {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 4px;
+  border-radius: 4px;
+  z-index: 10;
+}
+
+.ti-video-details {
+  display: flex;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+/* ダミーのチャンネルアイコン (Task-Inject用のカスタムロゴ) */
+.ti-channel-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--ti-accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+.ti-video-meta {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* text truncation work on flex child */
+}
+
+.ti-video-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ti-text-main);
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+/* YouTubeのテーマに追従するタイトルの色指定 */
+html[dark] .ti-video-title {
+  color: #f1f1f1;
+}
+html:not([dark]) .ti-video-title {
+  color: #0f0f0f;
+}
+
+.ti-video-channel {
+  font-size: 12px;
+  color: var(--ti-text-sub);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ti-video-stats {
+  font-size: 12px;
+  color: var(--ti-text-sub);
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ti-video-stats::after {
+  content: "";
+}
+
+/* コンパクト（サイドバー・動画下リスト）用のスタイル */
+.task-inject-wrapper.ti-compact {
+  display: block;
+  width: 100%;
+}
+
+/* コンパクトパネル */
+.ti-panel.ti-compact {
+  flex-direction: column;
+  padding: 10px;
+  min-height: 94px;
+  height: auto;
+}
+
+.ti-panel.ti-compact::before {
+  height: 3px;
+}
+
+.ti-panel.ti-compact .ti-panel-header {
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+}
+
+.ti-panel.ti-compact .ti-panel-title {
+  font-size: 11px;
+}
+
+.ti-panel.ti-compact .ti-panel-badge {
+  font-size: 8px;
+  padding: 1px 6px;
+}
+
+.ti-panel.ti-compact .ti-task-list {
+  max-height: 80px;
+  gap: 4px;
+}
+
+.ti-panel.ti-compact .ti-task-item {
+  padding: 6px;
+}
+
+.ti-panel.ti-compact .ti-task-text {
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.ti-panel.ti-compact .ti-input-form {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.ti-panel.ti-compact .ti-input {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.ti-panel.ti-compact .ti-submit-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+/* コンパクト学習動画カード (YouTubeサイドバーに完全調和) */
+.ti-video-card.ti-compact {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  width: 100%;
+  text-decoration: none;
+}
+
+.ti-video-card.ti-compact .ti-video-thumbnail-wrapper {
+  width: 168px; /* YouTubeの標準コンパクトサムネイル幅 */
+  min-width: 168px;
+  padding-top: 0;
+  height: 94px;
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.ti-video-card.ti-compact .ti-video-thumbnail {
+  position: static;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ti-video-card.ti-compact .ti-video-details {
+  padding: 0;
+  min-width: 0;
+}
+
+.ti-video-card.ti-compact .ti-channel-avatar {
+  display: none; /* サイドバーではアバター非表示 */
+}
+
+.ti-video-card.ti-compact .ti-video-title {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  margin-bottom: 3px;
+  -webkit-line-clamp: 2;
+}
+
+.ti-video-card.ti-compact .ti-video-channel {
+  font-size: 11px;
+  margin-bottom: 1px;
+}
+
+.ti-video-card.ti-compact .ti-video-stats {
+  font-size: 11px;
+}

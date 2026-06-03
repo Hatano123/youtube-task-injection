@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Task-Inject",
+  "version": "1.0.0",
+  "description": "YouTubeのホーム画面にタスクと学習動画をインジェクトし、自然に行動を誘導するChrome拡張機能",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
