@@ -12,6 +12,8 @@
   let isSearching = false; // 重複検索防止フラグ
   let isManipulatingDOM = false; // DOM操作中のフラグ（無限ループ防止）
   let unprocessedItemsStore = []; // 未処理アイテムの一時保存バッファ
+  let usedVideos = []; // 表示済みの動画を一時格納するプール（重複防止）
+  let recentlyShownVideoIds = []; // リセットされても消えない、最近表示した動画IDの履歴 (最大40件)
 
   // 拡張機能のコンテキストが有効であるかチェックする関数
   function isContextValid() {
@@ -113,23 +115,23 @@
     isManipulatingDOM = true;
     activeTasks = tasks;
     
-    // 学習動画プールの更新
-    await refreshVideoPool();
-    
-    if (!isContextValid()) {
-      isManipulatingDOM = false;
-      return;
-    }
-    
-    // 既存のインジェクションを一度クリア
+    // 1. 既存のインジェクションを一度クリア
     resetInjections();
     
-    // 新しい状態に沿って再適用
+    // 2. プレースホルダー（スケルトン）を先に配置しておすすめ動画の上部枠を確保
     applyInjectionToExistingElements();
     isManipulatingDOM = false;
+    
+    // 3. 動画プールの構築（非同期・並列実行）
+    await refreshVideoPool();
+    
+    if (!isContextValid()) return;
+    
+    // 4. ロードした動画をプレースホルダーへ流し込む（非同期反映）
+    bindPlaceholderVideos();
   }
 
-  // 未完了タスクをもとに動画プールを構築 (個別タスク単体に加え、複合クエリでも検索を行う)
+  // 未完了タスクをもとに動画プールを構築 (各タスクの動画を均等にインターリーブする)
   async function refreshVideoPool() {
     if (!isContextValid()) return;
     const uncompletedTasks = activeTasks.filter(t => !t.completed);
@@ -143,71 +145,107 @@
     isSearching = true;
 
     try {
-      const allTaskVideos = [];
-      const queries = [];
+      const taskVideoGroups = {}; // タスクごとの動画グループ
+      uncompletedTasks.forEach(t => {
+        taskVideoGroups[t.id] = [];
+      });
+      let compositeVideos = []; // 複合クエリの動画リスト
 
-      // 1. 各タスク単体の個別クエリを追加
+      // 実行する並列タスク（プロミスの配列）
+      const searchTasks = [];
+
+      // 1. 各タスクの個別およびバリエーション検索のタスクを作成
       uncompletedTasks.forEach(task => {
-        queries.push(task.text.trim());
+        const baseQuery = task.text.trim();
+        const queries = [
+          baseQuery,
+          `${baseQuery} 解説`,
+          `${baseQuery} チュートリアル`,
+          `${baseQuery} 講座`
+        ];
+
+        queries.forEach(query => {
+          searchTasks.push((async () => {
+            let videos = [];
+            if (videoCache[query]) {
+              videos = videoCache[query];
+            } else {
+              log(`Requesting search for: "${query}"`);
+              const response = await fetchSearchVideosFromBackground(query);
+              if (response && response.success && response.videos) {
+                videoCache[query] = response.videos;
+                videos = response.videos;
+              }
+            }
+            taskVideoGroups[task.id].push(...videos);
+          })());
+        });
       });
 
-      // 2. 複数の未完了タスクがある場合、キーワードを掛け合わせた複合クエリを自動生成
+      // 2. 複合クエリの検索タスクを作成 (タスクが2個以上の場合のみ)
       if (uncompletedTasks.length >= 2) {
-        // 全体の結合クエリ (最大3個まで連結して複雑になりすぎるのを防ぐ)
+        const compositeQueries = [];
         const combinedAll = uncompletedTasks.slice(0, 3).map(t => t.text.trim()).join(' ');
-        queries.push(combinedAll);
+        compositeQueries.push(combinedAll);
 
-        // タスクが3個以上ある場合、隣り合うペアの複合クエリも生成 (例: A B, B C, C A)
         if (uncompletedTasks.length >= 3) {
           for (let i = 0; i < uncompletedTasks.length; i++) {
             const nextIdx = (i + 1) % uncompletedTasks.length;
-            const combinedPair = `${uncompletedTasks[i].text.trim()} ${uncompletedTasks[nextIdx].text.trim()}`;
-            queries.push(combinedPair);
+            compositeQueries.push(`${uncompletedTasks[i].text.trim()} ${uncompletedTasks[nextIdx].text.trim()}`);
           }
         }
-      }
 
-      // 重複クエリを排除
-      const uniqueQueries = [...new Set(queries)].filter(q => q.length > 0);
-      log('Generated search queries (including composites):', uniqueQueries);
+        const uniqueCompositeQueries = [...new Set(compositeQueries)].filter(q => q.length > 0);
 
-      for (const query of uniqueQueries) {
-        // キャッシュにあればそれを使用
-        if (videoCache[query]) {
-          allTaskVideos.push(...videoCache[query]);
-          continue;
-        }
-
-        // キャッシュになければbackgroundに検索を依頼
-        log(`Requesting search for: "${query}"`);
-        let response = null;
-        try {
-          response = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(
-              { action: 'search_videos', query: query },
-              (res) => {
-                if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-                } else {
-                  resolve(res);
-                }
+        uniqueCompositeQueries.forEach(query => {
+          searchTasks.push((async () => {
+            let videos = [];
+            if (videoCache[query]) {
+              videos = videoCache[query];
+            } else {
+              log(`Requesting search for composite: "${query}"`);
+              const response = await fetchSearchVideosFromBackground(query);
+              if (response && response.success && response.videos) {
+                videoCache[query] = response.videos;
+                videos = response.videos;
               }
-            );
-          });
-        } catch (err) {
-          log('Failed to send message to background:', err);
-        }
-
-        if (response && response.success && response.videos && response.videos.length > 0) {
-          log(`Found ${response.videos.length} videos for "${query}"`);
-          videoCache[query] = response.videos;
-          allTaskVideos.push(...response.videos);
-        } else {
-          log(`No videos found or error for "${query}"`);
-        }
+            }
+            compositeVideos.push(...videos);
+          })());
+        });
       }
 
-      // 最低再生数の設定を取得してフィルタリング
+      // すべての検索を並列に実行して完了を待つ (劇的高速化！)
+      await Promise.all(searchTasks);
+
+      if (!isContextValid()) return;
+
+      // 各タスクのグループ内での重複排除
+      uncompletedTasks.forEach(task => {
+        const seenIds = new Set();
+        taskVideoGroups[task.id] = shuffleArray(
+          taskVideoGroups[task.id].filter(v => {
+            if (seenIds.has(v.videoId)) return false;
+            seenIds.add(v.videoId);
+            return true;
+          })
+        );
+      });
+
+      // 複合クエリ動画の重複排除
+      const seenIds = new Set();
+      compositeVideos = shuffleArray(
+        compositeVideos.filter(v => {
+          if (seenIds.has(v.videoId)) return false;
+          seenIds.add(v.videoId);
+          return true;
+        })
+      );
+
+      // 3. 全体でのデデュプリケーション用IDセットの準備 (タスク間で被っている動画を防ぐ)
+      const globalSeenIds = new Set();
+
+      // 4. 最低再生数の設定を取得
       const settings = await new Promise((resolve) => {
         if (!isContextValid()) {
           resolve({ minViews: 0 });
@@ -217,23 +255,114 @@
       });
       const minViews = settings.minViews || 0;
 
-      let filteredVideos = allTaskVideos;
-      if (minViews > 0) {
-        filteredVideos = allTaskVideos.filter(video => {
-          const views = parseViewCount(video.viewCountText);
-          return views >= minViews;
-        });
-        log(`Filtered videos by minViews (${minViews}): ${allTaskVideos.length} -> ${filteredVideos.length}`);
+      // フィルタリング処理用ヘルパー
+      function filterVideo(video) {
+        const views = parseViewCount(video.viewCountText);
+        if (minViews > 0 && views < minViews) return false;
+        if (recentlyShownVideoIds.includes(video.videoId)) return false;
+        if (globalSeenIds.has(video.videoId)) return false;
+        globalSeenIds.add(video.videoId);
+        return true;
       }
 
-      // 取得した動画をシャッフルまたは交互にマージしてプールに格納
-      videoPool = shuffleArray(filteredVideos);
+      // 各グループをフィルタリング
+      const filteredGroups = [];
+      uncompletedTasks.forEach(t => {
+        const filtered = taskVideoGroups[t.id].filter(filterVideo);
+        if (filtered.length > 0) {
+          filteredGroups.push(filtered);
+        }
+      });
+      
+      const filteredComposite = compositeVideos.filter(filterVideo);
+      if (filteredComposite.length > 0) {
+        filteredGroups.push(filteredComposite);
+      }
+
+      // もしフィルタリングの結果、動画が完全に枯渇してしまった場合は履歴フィルターのみを一時解除して再構築
+      let finalVideos = [];
+      const totalFilteredCount = filteredGroups.reduce((acc, g) => acc + g.length, 0);
+
+      if (totalFilteredCount === 0) {
+        log('All videos filtered out by shown history. Bypassing history filter for interleaving.');
+        globalSeenIds.clear();
+        
+        function filterVideoNoHistory(video) {
+          const views = parseViewCount(video.viewCountText);
+          if (minViews > 0 && views < minViews) return false;
+          if (globalSeenIds.has(video.videoId)) return false;
+          globalSeenIds.add(video.videoId);
+          return true;
+        }
+
+        const fallbackGroups = [];
+        uncompletedTasks.forEach(t => {
+          const filtered = taskVideoGroups[t.id].filter(filterVideoNoHistory);
+          if (filtered.length > 0) {
+            fallbackGroups.push(filtered);
+          }
+        });
+        const fallbackComposite = compositeVideos.filter(filterVideoNoHistory);
+        if (fallbackComposite.length > 0) {
+          fallbackGroups.push(fallbackComposite);
+        }
+
+        finalVideos = interleaveGroups(fallbackGroups);
+      } else {
+        // 5. インターリーブ（均等交互マージ）の実行
+        finalVideos = interleaveGroups(filteredGroups);
+      }
+
+      log(`Interleaved final pool size: ${finalVideos.length} videos`);
+
+      // 取得した動画プールを格納 (pop()で末尾から取り出すので、逆順にして先頭から出るようにする)
+      videoPool = finalVideos.reverse();
       
     } catch (e) {
       console.error('Error refreshing video pool:', e);
     } finally {
       isSearching = false;
     }
+  }
+
+  // バックグラウンドに検索を要求するヘルパー関数
+  async function fetchSearchVideosFromBackground(query) {
+    try {
+      return await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: 'search_videos', query: query },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+            } else {
+              resolve(res);
+            }
+          }
+        );
+      });
+    } catch (err) {
+      log(`Failed to send search message for "${query}":`, err);
+      return { success: false };
+    }
+  }
+
+  // 複数の動画グループから交互に要素を取り出してマージする（均等インターリーブ）
+  function interleaveGroups(groups) {
+    const result = [];
+    let hasMore = true;
+    let index = 0;
+
+    while (hasMore) {
+      hasMore = false;
+      for (const group of groups) {
+        if (index < group.length) {
+          result.push(group[index]);
+          hasMore = true;
+        }
+      }
+      index++;
+    }
+    return result;
   }
 
   // 配列のシャッフル (動画サジェストをランダムにするため)
@@ -302,6 +431,7 @@
     log('Resetting injections...');
     itemIndex = 0;
     unprocessedItemsStore = []; // 未処理プールをクリア
+    usedVideos = [];            // 使用済み動画プールをクリア
     
     // インジェクトした要素をすべて削除
     const injectedWrappers = document.querySelectorAll('.task-inject-wrapper');
@@ -392,9 +522,9 @@
           wrapper.className = 'task-inject-wrapper' + (isCompact ? ' ti-compact' : '');
           item.appendChild(wrapper);
 
-          // タスクが未設定、またはインジェクト対象枠の3回に1回はタスクパネルを挿入する
+          // タスクが未設定なら必ずタスクパネル。設定時はインジェクト対象の8回に1回だけタスクパネルを表示（ダブり防止のため出現頻度を大幅引き下げ）
           itemIndex++;
-          const showPanel = uncompletedTasks.length === 0 || (itemIndex % 3 === 0);
+          const showPanel = uncompletedTasks.length === 0 || (itemIndex % 8 === 0);
 
           if (showPanel) {
             renderTaskPanel(wrapper, isCompact);
@@ -516,24 +646,43 @@
     container.appendChild(panel);
   }
 
-  // 学習動画カードのレンダリング
-  function renderSuggestedVideo(container, isCompact = false) {
-    // プールから動画を取得
-    const video = videoPool.pop();
+  // プレースホルダー（スケルトン）カードをレンダリングする
+  function renderSkeletonCard(container, isCompact = false) {
+    container.setAttribute('data-ti-placeholder', isCompact ? 'compact' : 'normal');
 
-    // 動画がプールにない場合（検索結果がまだ届いていない、または結果が0件の場合）はタスクパネルを代わりに表示
-    if (!video) {
-      renderTaskPanel(container, isCompact);
-      return;
+    const card = document.createElement('div');
+    card.className = 'ti-video-card ti-placeholder-card' + (isCompact ? ' ti-compact' : '');
+
+    if (isCompact) {
+      card.innerHTML = `
+        <div class="ti-skeleton-thumb ti-skeleton"></div>
+        <div class="ti-video-details" style="flex-grow: 1;">
+          <div class="ti-video-meta">
+            <div class="ti-skeleton-text ti-skeleton-title ti-skeleton"></div>
+            <div class="ti-skeleton-text ti-skeleton-channel ti-skeleton" style="width: 50%;"></div>
+            <div class="ti-skeleton-text ti-skeleton-channel ti-skeleton" style="width: 30%;"></div>
+          </div>
+        </div>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="ti-skeleton-thumb ti-skeleton"></div>
+        <div class="ti-video-details">
+          <div class="ti-skeleton-avatar ti-skeleton"></div>
+          <div class="ti-video-meta" style="flex-grow: 1;">
+            <div class="ti-skeleton-text ti-skeleton-title ti-skeleton"></div>
+            <div class="ti-skeleton-text ti-skeleton-channel ti-skeleton" style="width: 60%;"></div>
+            <div class="ti-skeleton-text ti-skeleton-channel ti-skeleton" style="width: 40%;"></div>
+          </div>
+        </div>
+      `;
     }
 
-    // 次回のために動画プールを再利用（プールの末尾に追加してループさせる）
-    videoPool.unshift(video);
+    container.appendChild(card);
+  }
 
-    const card = document.createElement('a');
-    card.className = 'ti-video-card' + (isCompact ? ' ti-compact' : '');
-    card.href = `/watch?v=${video.videoId}`;
-
+  // 実際の動画カードの中身をレンダリングする
+  function renderSuggestedVideoContent(card, video, isCompact = false) {
     // チャンネル名の頭文字をアバターにする
     const avatarChar = video.channelName ? video.channelName.charAt(0).toUpperCase() : 'L';
 
@@ -575,12 +724,111 @@
         </div>
       `;
     }
+  }
 
-    // 特別なクリックイベントの制御は行わず、デフォルトのaタグリンクとして動作させます。
-    // YouTubeアプリのグローバルなクリックリスナーがSPA遷移を正しくハンドリングするため、
-    // ここでカスタムイベント（yt-navigateなど）を発火すると内部エラーが発生するのを防ぎます。
+  // 学習動画カードのレンダリング (プレースホルダーまたは実カードの判断)
+  function renderSuggestedVideo(container, isCompact = false) {
+    // メインプールが空になり、使用済みプールに動画がある場合はリサイクル
+    if (videoPool.length === 0 && usedVideos.length > 0) {
+      log('Video pool exhausted. Recycling used videos...');
+      videoPool = shuffleArray(usedVideos);
+      usedVideos = [];
+    }
 
+    // プールから動画を取得
+    const video = videoPool.pop();
+
+    // 動画がプールにない場合
+    if (!video) {
+      if (isSearching) {
+        // 検索中（読み込み中）の場合はプレースホルダーを表示
+        renderSkeletonCard(container, isCompact);
+      } else {
+        // 検索完了後なのに動画がない（結果が0件、フィルター等で全滅）場合は元の表示に戻す
+        const parent = container.parentElement;
+        if (parent) {
+          const originalContent = parent.querySelector('#content') || parent.querySelector('#dismissible');
+          if (originalContent) {
+            originalContent.style.display = '';
+            originalContent.removeAttribute('data-ti-hidden');
+          }
+          parent.setAttribute('data-ti-processed', 'normal');
+        }
+        container.remove();
+      }
+      return;
+    }
+
+    // 表示した動画は使用済みプールにストック
+    usedVideos.push(video);
+
+    // 最近表示した動画の履歴リストに追加
+    if (!recentlyShownVideoIds.includes(video.videoId)) {
+      recentlyShownVideoIds.push(video.videoId);
+      if (recentlyShownVideoIds.length > 40) {
+        recentlyShownVideoIds.shift();
+      }
+    }
+
+    const card = document.createElement('a');
+    card.className = 'ti-video-card' + (isCompact ? ' ti-compact' : '');
+    card.href = `/watch?v=${video.videoId}`;
+    
+    renderSuggestedVideoContent(card, video, isCompact);
     container.appendChild(card);
+  }
+
+  // 取得完了時にプレースホルダー要素を本物の動画に書き換える (遅延バインディング)
+  function bindPlaceholderVideos() {
+    if (!isContextValid()) return;
+    isManipulatingDOM = true;
+
+    const placeholders = document.querySelectorAll('[data-ti-placeholder]');
+    log(`Binding videos to ${placeholders.length} placeholders...`);
+
+    placeholders.forEach(wrapper => {
+      const isCompact = wrapper.getAttribute('data-ti-placeholder') === 'compact';
+
+      // プールから動画を取得
+      const video = videoPool.pop();
+
+      if (video) {
+        // 使用済みプールに保存
+        usedVideos.push(video);
+        if (!recentlyShownVideoIds.includes(video.videoId)) {
+          recentlyShownVideoIds.push(video.videoId);
+          if (recentlyShownVideoIds.length > 40) {
+            recentlyShownVideoIds.shift();
+          }
+        }
+
+        // プレースホルダーのHTMLをリセットし、本物の中身を挿入
+        wrapper.innerHTML = '';
+        wrapper.removeAttribute('data-ti-placeholder');
+
+        const card = document.createElement('a');
+        card.className = 'ti-video-card' + (isCompact ? ' ti-compact' : '');
+        card.href = `/watch?v=${video.videoId}`;
+
+        renderSuggestedVideoContent(card, video, isCompact);
+        wrapper.appendChild(card);
+      } else {
+        // 動画データが足りなくなった場合は元の動画に戻す
+        wrapper.removeAttribute('data-ti-placeholder');
+        const parent = wrapper.parentElement;
+        if (parent) {
+          const originalContent = parent.querySelector('#content') || parent.querySelector('#dismissible');
+          if (originalContent) {
+            originalContent.style.display = '';
+            originalContent.removeAttribute('data-ti-hidden');
+          }
+          parent.setAttribute('data-ti-processed', 'normal');
+        }
+        wrapper.remove();
+      }
+    });
+
+    isManipulatingDOM = false;
   }
 
   // タスク追加

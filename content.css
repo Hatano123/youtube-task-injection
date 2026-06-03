@@ -517,3 +517,66 @@ html:not([dark]) .ti-video-title {
 .ti-video-card.ti-compact .ti-video-stats {
   font-size: 11px;
 }
+
+/* スケルトンプレースホルダー (読み込み中アニメーション) */
+.ti-skeleton {
+  background: linear-gradient(90deg, var(--ti-border) 25%, rgba(255,255,255,0.08) 50%, var(--ti-border) 75%);
+  background-size: 200% 100%;
+  animation: tiSkeletonLoading 1.5s infinite ease-in-out;
+}
+
+html:not([dark]) .ti-skeleton {
+  background: linear-gradient(90deg, var(--ti-border) 25%, rgba(0,0,0,0.03) 50%, var(--ti-border) 75%);
+  background-size: 200% 100%;
+  animation: tiSkeletonLoading 1.5s infinite ease-in-out;
+}
+
+@keyframes tiSkeletonLoading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.ti-video-card.ti-placeholder-card {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.ti-skeleton-thumb {
+  width: 100%;
+  padding-top: 56.25%;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.ti-video-card.ti-compact .ti-skeleton-thumb {
+  width: 168px;
+  min-width: 168px;
+  height: 94px;
+  padding-top: 0;
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.ti-skeleton-text {
+  height: 14px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.ti-skeleton-title {
+  width: 90%;
+  height: 16px;
+}
+
+.ti-skeleton-channel {
+  width: 60%;
+  height: 12px;
+}
+
+.ti-skeleton-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
